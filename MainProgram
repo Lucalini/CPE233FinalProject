@@ -1,0 +1,132 @@
+.data
+mess:     .byte    0x63,0x31,0x61,0xFF,0x25,0x0D,0x0D,0xFF,0x9F
+          .byte    0x49,0xFF,0x63,0xC5,0xC5,0xE3,0xFF,0xFF
+
+.text
+
+Init:		la 	x10, ISR  		       #loads ISR address
+        	csrrw 	x16, mtvec, x10       	#store address as interrupt vector
+         
+         	li     x12, 0x1100D000  		# timer counter CSR port address
+         	li     x13, 0x1100D004  		# timer counter count port address
+
+		li     x20,0x0000FFFF  		# for ~1.5Hz blink rate
+       	sw     x20,0(x13)      		# init TC count 
+        
+        	li     x20 0x01        		# init TC CSR
+       	sw     x20,0(x12)      		# no prescale, turn on TC
+       
+		la x9, mess 	            		#loads lookup table address
+   		addi x30, x9, 16 	      	 	#value of final space
+		li    x11, 0x1100C004      	#segments address
+		li    x12, 0x1100C008    		#anodes address
+   		li    x13, 0xFF		  	#anodes off
+		mv    x21, x0				#used to anode value
+		li    x22, 1				#loads 1 for ISR
+		li    x23, 2				#loads 2 for ISR
+		li    x26, 0x11008004		# button port address 
+
+   		li    x14, 7               	#0 anode on
+   		addi   x4, x9, 3  	      		#associated segments address
+  		lbu   x24, 0(x4) 			#right anode associated REG
+ 	
+       	li    x15, 11               	#1 anode on
+       	addi  x5, x9, 2	    		#associated segments address
+       	lbu   x25, 0(x5)			#mid right anode associated REG
+	   
+
+       	li    x18, 13               	#2 anode on	
+	 	addi  x8, x9, 1	      		#associated segments address
+  	 	lbu   x28, 0(x8)			#mid left anode associated REG
+   
+
+      		li    x17, 14           		#3 anode on
+      		addi  x7, x9, 0	      		#associated segments address
+      		lbu   x27, 0(x7)			#left anode associated REG
+      
+
+
+      		li x20, 0x8				#val to enable interrupts
+      		csrrs x16, mstatus, x20        	#enable interrupts 
+      
+poll1:		lw	x19, 0(x26)			# loading the lsb into x19
+		andi 	x19, x19, 1			# anding the lsb with 1
+            	beqz	x19, poll1			# sees if button pressed
+            	call	delay_ff			#delays to check validity
+            
+poll2:		lw	x29, 0(x26)			# loading the lsb into x29
+		andi	x29, x29, 1			# masking the buttons lsb again
+		beqz x29, poll1   			# check validity
+            	j	valid				# if it is a valid press, then valid
+                                
+delay_ff: 	li 	x31, 0x4FFFF 	  		# load count	
+
+loop:		beq 	x31, x0, done 		# leave if done
+ 		addi 	x31, x31, -1 			# decrement count
+		j 	loop				# loop	
+
+done: 		ret
+
+
+Valid:		call 	delay_ff
+
+anode1: 	beq 	x4,x30, Edge1			# if anode 1 displays _ branch 
+  	  	addi, 	x4,x4, 1			# if not increment address as normal
+        	lbu   	x24,0(x4) 			# load new segment value into reg
+        	j 	anode2				# jump to skip edgecase
+Edge1: 	addi, 	x4, x9, 0			# restore original LUT address into x4
+        	lbu   	x24, 0(x4) 			# load the lookup table value
+
+anode2:  	beq	x5, x30, Edge2   		#if anode 2 displays _ branch 
+  		addi, 	x5, x5, 1        		#if not increment address as normal
+      	 	lbu   	x25, 0(x5) 	      		#load new segment value into reg
+         	j 	anode3				#jump to skip edgecase
+Edge2:  	addi, 	x5, x9, 0			#restore original LUT address into x5  
+        	lbu   	x25, 0(x5) 			#load the lookup table value
+
+anode3:  	beq 	x8, x30, Edge3   		#if anode 3 displays _ branch 
+  	 	addi, 	x8, x8, 1			#if not increment address as normal
+         	lbu   	x28, 0(x8) 			#load new segment value into reg
+         	j 	anode4				#jump to skip edgecase
+Edge3:  	addi, 	x8, x9, 0			#restore original LUT address into x8
+         	lbu   	x28, 0(x8)	
+
+anode4:  	beq 	x7, x30, Edge4   	 	#if anode 4 displays _ branch 
+  	 	addi, 	x7, x7, 1			#if not increment address as normal
+         	lbu   	x27, 0(x7) 			#load new segment value into reg
+	 	j 	poll1				#jump to skip edgecase
+Edge4:  	addi, 	x7, x9, 0	 		#restore original LUT address into x7
+        	lbu   	x27, 0(x7) 			#load the lookup table value	
+		j 	poll1				#done with incremenet
+     
+ISR:	  
+start:	
+	  	beqz 	x21, run1
+	  	beq  	x21, x22, run2
+	  	beq  	x21, x23, run3
+          	bgt  	x21, x23, run4
+
+run1:   	sb   	x13, 0(x12)      		#turn anodes off
+ 	 	sb    	x24, 0(x11)    		#load right reg value into segments
+   	  	sb    	x14, 0(x12)			#turn right anode on
+	  	addi 	x21, x21, 1 			#increments our run checker
+	  	mret
+
+run2:  	sb   	x13, 0(x12)			#turn anodes off
+ 		sb    	x25, 0(x11)    		#load mid right reg value into segments
+  	 	sb    	x15, 0(x12)			#turn mid right anode on  
+ 		addi 	x21, x21, 1 			#increments our run checker 
+	 	mret
+
+
+run3: 	  	sb   	x13, 0(x12)			#turn anodes off
+ 	 	sb    	x28, 0(x11)    		#load mid left reg value into segments
+        	sb    	x18, 0(x12)			#turn mid left anode on 
+  		addi 	x21, x21, 1 			#increments our run checker  
+	 	mret
+
+run4: 	  	sb   	x13, 0(x12)			#turn anodes off
+  	  	sb   	x27, 0(x11)   		#load left reg value into segments
+  	  	sb    	x17, 0(x12)			#turn left anode on  
+	  	mv 	x21, x0  			#clears our run checker
+	 	mret
